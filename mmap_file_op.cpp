@@ -41,6 +41,7 @@ namespace qiniu {
 			return TFS_SUCCESS;
 		}
 
+		// pRead_file()可以把内存中的文件内容读取到buf上
 		int MMapFileOperation::pRead_file(char* buf, const int32_t size, const int64_t offset)
 		{
 			//情况一：当文件已经映射到内存时
@@ -61,6 +62,7 @@ namespace qiniu {
 			return FileOperation::pRead_file(buf, size, offset);	
 		}
 
+		//pWrite_file会把buf立的内容写入到内存中
 		int MMapFileOperation::pWrite_file(const char* buf, const int32_t size, const int64_t offset)
 		{
 			//情况一：当文件已经映射到内存时

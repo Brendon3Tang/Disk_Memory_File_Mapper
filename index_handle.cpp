@@ -22,6 +22,7 @@ namespace qiniu {
 				mmap_file_op_ = NULL;
 			}
 		}
+
 		int IndexHandler::create(const uint32_t logic_block_id, const int32_t bucket_size, const MMapOption map_option)
 		{
 			int ret = TFS_SUCCESS;
@@ -46,11 +47,15 @@ namespace qiniu {
 				init_header.index_file_size_ = sizeof(IndexHeader) + sizeof(int32_t)*bucket_size;
 
 				//一起分配IndexHeader+bucket的空间，并且初始化
+				/*
+				init_data是包含整个索引文件信息的临时内存的起始地址，稍后将init_data这个临时内存（buf）
+				用pWrite_file写入到内存中的映射区域，就完成了索引文件的创建。
+				*/
 				char* init_data = new char[init_header.index_file_size_];
 				memcpy(init_data, &init_header, sizeof(IndexHeader));
 				memset(init_data + sizeof(IndexHeader), 0, init_header.index_file_size_ - sizeof(IndexHeader));
 
-				//分配且初始化IndexHandler索引文件信息之后将这些索引文件信息写入索引文件中
+				//分配且初始化IndexHandle索引文件信息之后将这些索引文件信息写入索引文件中
 				ret = mmap_file_op_->pWrite_file(init_data, init_header.index_file_size_, 0);
 				if (ret != TFS_SUCCESS) {
 					return ret;
@@ -67,7 +72,7 @@ namespace qiniu {
 				init_data = NULL;
 			}
 
-			//映射索引文件到内存
+			//映射索引文件到内存访问
 			ret = mmap_file_op_->mmap_file(map_option);
 			if (ret != TFS_SUCCESS) {
 				return ret;
@@ -88,6 +93,7 @@ namespace qiniu {
 
 			return TFS_SUCCESS;
 		}
+
 		int IndexHandler::load(const uint32_t logic_block_id, const int32_t bucket_size, const MMapOption map_option)
 		{
 			int ret = TFS_SUCCESS;
@@ -102,6 +108,7 @@ namespace qiniu {
 			else if (mapped_size == 0) {//empty file
 				return EXIT_INDEX_CORRUPT_ERROR;
 			}
+
 			//只有file_size大于0才会继续运行，但仍有三种情况：
 			//如果file_size在合理的映射区间，那么把映射规则中首次映射的大小改成file_size。
 			//如果file_size小于首次映射大小，那么不需要改变，直接按照首次映射大小的值来映射
@@ -157,6 +164,7 @@ namespace qiniu {
 
 			return TFS_SUCCESS;
 		}
+
 		int IndexHandler::remove(const uint32_t logic_block_id)
 		{
 			if (is_loaded) {//如果确实loaded了，那么检查id是否匹配
@@ -174,6 +182,7 @@ namespace qiniu {
 			ret = mmap_file_op_->unlink_file();
 			return ret;
 		}
+
 		int IndexHandler::flush()
 		{
 			int ret = mmap_file_op_->flush_file();
@@ -183,6 +192,7 @@ namespace qiniu {
 			}
 			return ret;
 		}
+
 		int32_t IndexHandler::write_segment_meta(const uint64_t key, MetaInfo& meta_info)
 		{
 			int32_t current_offset = 0, previous_offset = 0;
@@ -202,12 +212,13 @@ namespace qiniu {
 			return TFS_SUCCESS;
 		}
 
+		// 通过key找到内存中对应的meta文件并且将内存中的meta文件存入引用：meta_info
 		int32_t IndexHandler::read_segment_meta(const uint64_t key, MetaInfo& meta_info)
 		{
 			int32_t current_offset = 0, previous_offset = 0;
 			int ret = hash_find(key, current_offset, previous_offset);
 
-			if (ret == TFS_SUCCESS) {//如果当前的key已存在，返回error
+			if (ret == TFS_SUCCESS) {//如果当前的key已存在
 				ret = mmap_file_op_->pRead_file(reinterpret_cast<char*>(&meta_info), sizeof(MetaInfo), current_offset);
 				return ret;
 			}
@@ -276,10 +287,14 @@ namespace qiniu {
 			current_offset = 0;
 			previous_offset = 0;
 
-			int32_t slot = static_cast<uint32_t>(key) % get_bucket_size();	//得到当前key是在第几个桶（即哈希值是多少）
-			int32_t pos = get_first_meta_info()[slot];	//得到meta_info的数组头（是一个指针），并通过哈希值slot来找到对应的哈希链表
+			int32_t slot = static_cast<uint32_t>(key) % get_bucket_size();	//得到当前key表示桶中第几个链表（即哈希值是多少）
+			//注意，由于哈希桶中的所有节点都是一个int32类型的变量，用来指向具体的哈希链表，所以在最开始的时候pos = 0。
+			int32_t pos = get_first_meta_info()[slot];	//得到meta_info/哈希桶的数组头（是一个指针），并通过哈希值slot来找到桶对应的哈希链表
+			
+			/* 如果pos == 0，说明哈希桶中的第slot个链表还是空的，并没有节点，此时不需要做遍历，直接返回NOT FOUND
+			只有当pos != 0，才表示哈希桶中第slot个链表中已经有节点了，此时需要用while遍历*/
 			while (pos != 0) {
-				//读取mmap_file_op中的data（IndexHandler）中的对应的meta_info到cur_meta_info中，因此offset是刚刚得到的pos，大小是一个MetaInfo的大小
+				//读取mmap_file_op中的data（IndexHandler）中的对应的meta_info到cur_meta_info里去，因此offset是刚刚得到的pos，大小是一个MetaInfo的大小
 				ret = mmap_file_op_->pRead_file(reinterpret_cast<char*>(&cur_meta_info), sizeof(MetaInfo), pos);
 				if (ret != TFS_SUCCESS) {
 					return ret;
@@ -295,6 +310,7 @@ namespace qiniu {
 			}
 			return EXIT_META_NOT_FOUND;
 		}
+
 		int IndexHandler::hash_insert(const uint64_t key, int32_t previous_offset, MetaInfo& meta)
 		{
 			int ret = TFS_SUCCESS;
@@ -307,7 +323,7 @@ namespace qiniu {
 			//2.确定meta节点存储在文件中的偏移量
 			if (index_header()->free_head_offset_ != 0) {//如果可重用节点列表中有节点，则优先添加到这些节点里
 				MetaInfo tmp_meta_info;
-				ret = mmap_file_op_->pRead_file(reinterpret_cast<char*>(&tmp_meta_info), sizeof(MetaInfo), index_header()->free_head_offset_);	//取得可重用列表中的节点的信息，方便之后修改index_header的首节点。
+				ret = mmap_file_op_->pRead_file(reinterpret_cast<char*>(&tmp_meta_info), sizeof(MetaInfo), index_header()->free_head_offset_);	//取得可重用列表中的节点的信息，方便之后修改index_header中free_head_offset的首节点。
 				if (ret != TFS_SUCCESS) {
 					return ret;
 				}

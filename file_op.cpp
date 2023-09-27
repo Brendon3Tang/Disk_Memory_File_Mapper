@@ -5,7 +5,7 @@ namespace qiniu {
 		FileOperation::FileOperation(const std::string& file_name, const int open_flags) :
 			fd_(-1), open_flags_(open_flags)
 		{
-			file_name_ = strdup(file_name.c_str()); //stdup�൱�ڰѲ����е�ֵ���·����ڴ棬Ȼ�󷵻�����ڴ�
+			file_name_ = strdup(file_name.c_str()); //stdup相当于把参数中的值重新分配内存，然后返回这块内存
 		}
 		
 		FileOperation::~FileOperation()
@@ -21,7 +21,7 @@ namespace qiniu {
 		}
 		int FileOperation::open_file()
 		{
-			if (fd_ > 0) {	//���fd�Ѿ���
+			if (fd_ > 0) {	//如果fd已经打开
 				close(fd_);
 				fd_ = -1;
 			}
@@ -42,41 +42,42 @@ namespace qiniu {
 		}
 		int FileOperation::flush_file()
 		{
-			if (open_flags_ && O_SYNC)//O_SYNC��ͬ���ط�ʽ�����ݣ�û��Ҫ��flush
+			if (open_flags_ && O_SYNC)//O_SYNC以同步地方式打开数据，没必要再flush
 				return 0;
 
 			int fd = check_file();
 			if (fd < 0)
 				return fd;
 
-			return fsync(fd);	//�����������ڴ棩������ͬ��������
+			return fsync(fd);	//将缓存区（内存）的数据同步到磁盘。
+								//fsync的功能是确保文件fd所有已修改的内容已经正确同步到硬盘上，该调用会阻塞等待直到设备报告IO完成。
 		}
 
 		int FileOperation::unlink_file()
 		{
-			close_file();	//ȷ���ļ��ر�
-			return ::unlink(file_name_);	//ɾ���ļ�
+			close_file();	//确保文件关闭
+			return ::unlink(file_name_);	//删除文件
 		}
 
 		int FileOperation::pRead_file(char* buf, const int32_t nBytes, const int64_t offset)
 		{
-			int32_t left = nBytes;
-			int32_t read_len = 0;
-			int64_t read_offset = offset;
+			int32_t left = nBytes; //剩余需要读取的Byte数
+			int32_t read_len = 0;	//已读取的长度
+			int64_t read_offset = offset;	//开始读取的偏移量
 			char* cur_buf = buf;
-			int i = 0;
+			int i = 0;	//尝试次数
 
 			while (left > 0) {
-				i++;
+				i++;	//尝试次数如果超过5次，那么读取失败
 				if (i >= MAX_DISK_TIMES)	break;
 
 				if (check_file() < 0)	return -errno;
 
 				read_len = pread64(fd_, cur_buf, left, read_offset);
 
-				if (read_len < 0) {
+				if (read_len < 0) {	//如果读取的长度小于0，说明读取失败
 					read_len = -errno;
-
+					//查找读取失败的原因，如果是EINTR（被打断）和EAGAIN（资源暂时不可用）表示还可以继续尝试
 					if (-read_len == EINTR || -read_len == EAGAIN)	
 						continue;
 					else if (-read_len == EBADF) {
@@ -86,7 +87,7 @@ namespace qiniu {
 					else
 						return read_len;
 				}
-				else if (read_len == 0) {	//���������ĩβ
+				else if (read_len == 0) {	//如果读到了末尾
 					break;
 				}
 
@@ -95,7 +96,7 @@ namespace qiniu {
 				left -= read_len;
 			}
 
-			if (left != 0) {	//���ѭ����ɵ��ǻ���ʣ�࣬˵��û�����
+			if (left != 0) {	//如果循环完成但是还有剩余，说明没有完成
 				return EXIT_DISK_OPER_INCOMPLETE;
 			}
 			return TFS_SUCCESS;
@@ -129,7 +130,7 @@ namespace qiniu {
 					else
 						return written_len;
 				}
-				else if (written_len == 0) {	//���������ĩβ
+				else if (written_len == 0) {	//如果读到了末尾
 					break;
 				}
 
@@ -138,7 +139,7 @@ namespace qiniu {
 				left -= written_len;
 			}
 
-			if (left != 0) {	//���ѭ����ɵ��ǻ���ʣ�࣬˵��û�����
+			if (left != 0) {	//如果循环完成但是还有剩余，说明没有完成
 				return EXIT_DISK_OPER_INCOMPLETE;
 			}
 			return TFS_SUCCESS;
@@ -176,7 +177,7 @@ namespace qiniu {
 				left -= written_len;
 			}
 
-			if (left != 0) {	//���ѭ����ɵ��ǻ���ʣ�࣬˵��û�����
+			if (left != 0) {	//如果循环完成但是还有剩余，说明没有完成
 				return EXIT_DISK_OPER_INCOMPLETE;
 			}
 			return TFS_SUCCESS;
@@ -215,7 +216,7 @@ namespace qiniu {
 			if (fd < 0)
 				return -1;
 
-			return lseek(fd, offset, SEEK_SET);	//SEEK_SET��ʾoffset�����óɵ�ǰλ��+offset bytes
+			return lseek(fd, offset, SEEK_SET);	//SEEK_SET表示offset被设置成当前位置+offset bytes
 		}
 
 		int FileOperation::check_file()

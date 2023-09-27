@@ -41,7 +41,7 @@ namespace qiniu{
 
         bool MMapFile::sync_file(){
             if(data_ != NULL){
-                return msync(data_, size_, MS_ASYNC) == 0;
+                return msync(data_, size_, MS_ASYNC) == 0;  //msync用于保存映射在内存的文件I/O到磁盘上
             }
 
             return true;
@@ -92,7 +92,7 @@ namespace qiniu{
             return data_;
         }
 
-        int32_t MMapFile::get_size() const{   //数据的size
+        int32_t MMapFile::get_size() const{   //当前已经映射到内存的size
             return size_;
         }
 

@@ -6,7 +6,10 @@
 namespace qiniu{
     namespace largefile{
         /*
-        * FileOperation可以直接从磁盘打开文件，并进行读取/写入等操作，是MMapFileOperation的基类
+        * FileOperation可以直接从磁盘打开文件，并进行读取/写入等
+        * 操作(但还是会经过内存，即磁盘->内核缓存->用户进程)，但是只要程序运行期间不
+        * 崩溃，那么所有的read、write操作都会最终保存到磁盘中去。
+        * 该类是MMapFileOperation的基类。
         */
         class FileOperation{
         public:
