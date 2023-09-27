@@ -16,7 +16,7 @@ namespace qiniu {
 
 			BlockInfo block_info_;		//meta的块信息
 			int32_t bucket_size_;		//哈希桶大小
-			int32_t data_file_offset_;	//未使用数据的起始偏移
+			int32_t data_file_offset_;	//主块文件中的未使用数据的起始偏移
 			int32_t index_file_size_;	//索引文件的大小，同时也是偏移量(offset after index_header+all buckets),指向下一个待分配的索引文件位置
 			int32_t free_head_offset_;	//可重用的链表节点（即之前删掉的节点，他们并未真的被删除，只是被标记了）
 		};
