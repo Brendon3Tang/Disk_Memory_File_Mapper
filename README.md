@@ -150,6 +150,9 @@ void * mremap(void *old_address, size_t old_size , size_t new_size, int flag
   - 0代表不允许内核移动映射区域，  
   - MREMAP_MAYMOVE则表示内核可以根据实际情况移动映射区域以找到一个符合new_size大小要求的内存区域
 - 返回值：成功则返回0；失败则返回-1；   
+10. 哈希一致性（哈希环）。
+11. 哈希桶数量选择质数
+12. 哈希冲突的解决办法
 
 ## 七、优化效果：
 ### 正常读取：
