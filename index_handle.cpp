@@ -3,6 +3,10 @@
 
 namespace qiniu {
 	namespace largefile {
+		/*
+		*	IndexHandler使用由参数main_block_id和base_path组成的path创建一个MMapFileOperation对象（此时还未映
+		* 射到内存）
+		*/
 		IndexHandler::IndexHandler(const std::string& base_path, const uint32_t main_block_id)
 		{
 			std::stringstream tmp_stream;
@@ -23,6 +27,11 @@ namespace qiniu {
 			}
 		}
 
+		/**
+		 * 		create通过参数块号block_id，哈希桶大小bucket_size，和映射选项MMapOption创建块文件。注意，create中
+		 * 创建文件是通过普通I/O，即不会使用内存映射。虽然用了mmap_file_op，但其实调用的都是基类的函数。
+		 * 只有创建文件之后才会通过mmap_file()把他映射到内存。
+		*/
 		int IndexHandler::create(const uint32_t logic_block_id, const int32_t bucket_size, const MMapOption map_option)
 		{
 			int ret = TFS_SUCCESS;
@@ -38,7 +47,7 @@ namespace qiniu {
 			else if (file_size > 0) {
 				return EXIT_META_UNEXPECT_FOUND_ERROR;
 			}
-			else {//if file_size == 0，表示当前没有映射索引文件到内存
+			else {//if file_size == 0，表示当前磁盘中没有索引文件存在
 				IndexHeader init_header;	//先不直接分配IndexHeader的空间，稍后一起分配IndexHeader+bucket的空间
 				init_header.block_info_.block_id_ = logic_block_id;
 				init_header.block_info_.seq_no_ = 1;
@@ -49,7 +58,7 @@ namespace qiniu {
 				//一起分配IndexHeader+bucket的空间，并且初始化
 				/*
 				init_data是包含整个索引文件信息的临时内存的起始地址，稍后将init_data这个临时内存（buf）
-				用pWrite_file写入到内存中的映射区域，就完成了索引文件的创建。
+				用pWrite_file写入到页缓存，就完成了索引文件的创建，等待flush到磁盘
 				*/
 				char* init_data = new char[init_header.index_file_size_];
 				memcpy(init_data, &init_header, sizeof(IndexHeader));
@@ -61,7 +70,7 @@ namespace qiniu {
 					return ret;
 				}
 
-				//将索引文件保存到磁盘
+				//将页缓存中的索引文件保存到磁盘（此时还没映射到内存，因此最终fluss_file调用的也是基类，fsync()）。
 				ret = mmap_file_op_->flush_file();
 				if (ret != TFS_SUCCESS) {
 					return ret;
@@ -94,6 +103,15 @@ namespace qiniu {
 			return TFS_SUCCESS;
 		}
 
+		/**
+		 * 		load通过参数块号block_id，哈希桶大小bucket_size，和映射选项MMapOption加载块文件。首先根据磁盘中索引
+		 * 文件的大小更改MMapOption中的首次映射大小fisrt_mmap_size_。然后映射磁盘中的索引文件到内存中。
+		 * 		映射完之后要检查：
+		 * 			1. 索引文件中的block_id与bucket_size是否合法（> 0)
+		 * 			2. 磁盘中保存的索引文件的大小与映射之后得到的文件大小是否相等
+		 * 			3. 参数中logic_block_id与映射得到的索引文件中记录的block_id是否相等
+		 * 			4. 参数中bucket_size与映射得到的索引文件中记录的bucket_size是否相等
+		*/
 		int IndexHandler::load(const uint32_t logic_block_id, const int32_t bucket_size, const MMapOption map_option)
 		{
 			int ret = TFS_SUCCESS;
@@ -101,7 +119,7 @@ namespace qiniu {
 				return EXIT_INDEX_ALREADY_LOADED_ERROR;
 			}
 
-			int64_t mapped_size = mmap_file_op_->get_file_size();	//得到映射到内存的文件的大小
+			int64_t mapped_size = mmap_file_op_->get_file_size();	//得到映射到磁盘中的索引文件的大小
 			if (mapped_size < 0) {
 				return mapped_size;
 			}
@@ -131,7 +149,7 @@ namespace qiniu {
 				return EXIT_INDEX_CORRUPT_ERROR;
 			}
 
-			//检查file size是否和索引文件的大小是否相等
+			//检查磁盘中保存的索引文件大小file size是否和映射之后得到的索引文件的大小相等
 			int32_t index_file_size = sizeof(IndexHeader) + sizeof(int32_t) * get_bucket_size();
 			if (mapped_size < index_file_size) {
 				//fprintf(stderr, "IndexHeader: %lu, int32_t: %lu, get_bucket_size():%d\n", sizeof(IndexHeader), sizeof(int32_t), get_bucket_size());
@@ -165,6 +183,9 @@ namespace qiniu {
 			return TFS_SUCCESS;
 		}
 
+		/**
+		 * remove函数会调用munmap_file()删除mmap_file_op指针，然后close打开的文件，并且unlink文件
+		*/
 		int IndexHandler::remove(const uint32_t logic_block_id)
 		{
 			if (is_loaded) {//如果确实loaded了，那么检查id是否匹配
@@ -183,6 +204,10 @@ namespace qiniu {
 			return ret;
 		}
 
+		/**
+		 * flush()会调用mmap_file_op的flush_file()，flush_file()会通过判断文件是否被映射到内存而决定使用基类的
+		 * flush_file(最终使用fsync)或者使用派生类的flush_file(最终使用msync)。
+		*/
 		int IndexHandler::flush()
 		{
 			int ret = mmap_file_op_->flush_file();
@@ -212,7 +237,9 @@ namespace qiniu {
 			return TFS_SUCCESS;
 		}
 
-		// 通过key找到内存中对应的meta文件并且将内存中的meta文件存入引用：meta_info
+		/**
+		 * 通过key找到内存中对应的meta文件并且将内存中的meta文件存入引用：meta_info
+		 * */ 
 		int32_t IndexHandler::read_segment_meta(const uint64_t key, MetaInfo& meta_info)
 		{
 			int32_t current_offset = 0, previous_offset = 0;
@@ -279,6 +306,19 @@ namespace qiniu {
 			return TFS_SUCCESS;
 		}
 
+		/**
+		 * 	hash_find接收参数key表示要找的值，current_offset会记录当前slot的哈希链表中key节点的偏移量，
+		 * previous_offset会记录当前slot的哈希链表中的前一个节点的偏移量。
+		 * 具体步骤：
+		 * 	1.通过哈希函数计算得到key的哈希值slot
+		 * 	2. 通过slot确定哈希链表在哈希桶的哪个桶内，并得到地址（通过首个meta_info节点地址+slot偏移量得到）
+		 * 	3. 如果地址中存储的数据是0，说明该哈希桶没有值，直接返回
+		 * 	4. 如果地址中存储的数据是下一个节点的地址，开始遍历：
+		 * 		- 根据地址读取meta_info，比较值
+		 * 		- 如果找到了，则直接返回，不更新previous_offset的值
+		 * 		- 如果不相等则遍历下一个，同时用previous_offset记录当前节点地址
+		 * 	5. 遍历完成后没找到则返回false。
+		*/
 		int IndexHandler::hash_find(const uint64_t key, int32_t& current_offset, int32_t& previous_offset)
 		{
 			int ret = TFS_SUCCESS;
@@ -311,6 +351,20 @@ namespace qiniu {
 			return EXIT_META_NOT_FOUND;
 		}
 
+		/**
+		 * 	hash_insert接收参数key表示要找的值，current_offset会记录当前slot的哈希链表中key节点的偏移量，
+		 * previous_offset会记录当前slot的哈希链表中的前一个节点的偏移量。
+		 * 	具体步骤：
+		 * 		1. 计算出slot找到对应的哈希桶
+		 * 		2. 找到可以存储meta节点的位置（在「可重用链表的位置」或者「已使用过的索引文件列表的末尾」中二选一）
+		 * 			1. 如果「可重用链表的位置」中有空余节点，则读取「可重用节点链表的首节点」，然后把current_offset设置成可重用节
+		 * 	点链表的首节点的地址。更新可重用节点链表的首节点」使其指向列表的下一个可重用节点。
+		 * 			2. 如果「可重用链表的位置」中没有空余节点，则使用「已使用过的索引文件列表的末尾」。把current_offset设置成
+		 * 	index_header()->index_file_size_。然后把index_file_size_的偏移量后移。
+		 * 		3. 把meta节点信息写入索引文件：新meta的下一个节点offset设置成0，然后用pWrite把新meta放入current_offset
+		 * 		4. 用previous_offset来连接当前节点与之前存在的链表。如果没链表则在哈希桶中slot偏移量的位置放入
+		 * 	current_offset
+		*/
 		int IndexHandler::hash_insert(const uint64_t key, int32_t previous_offset, MetaInfo& meta)
 		{
 			int ret = TFS_SUCCESS;
