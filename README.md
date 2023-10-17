@@ -50,6 +50,7 @@
 
 
 ## 架构
+![架构图](img/arch.jpg)
 - IndexHandle通过MMapFileOperation来操控映射到内存中的索引文件。
 - MMapFileOperation继承自FileOperation，同时配合MMap_File这个对象来操作映射到内存中的数据
   - 通过MMap_File可以在构造函数中将文件映射到内存。然后在别的函数中（pRead，pWrite，flush）可知道文件是否已经映射到内存，以此判断pWrite，pRead，flush_file是该使用MMapFileOperation的函数还是基类FileOperation的函数版本。
@@ -57,7 +58,8 @@
 
 
 ## 其他
-1. meta_info中的file_id对应块文件中存储的文件的编号。block_info中的block_id对应的是该块文件的id
-2. meta_info的更改是通过接口：
+1. common.h中
+2. meta_info中的file_id对应块文件中存储的文件的编号。block_info中的block_id对应的是该块文件的id
+3. meta_info的更改是通过接口：
    1. write_segment_meta(meta_info.get_key(), meta_info)
    2. delete_segment_meta(file_id)

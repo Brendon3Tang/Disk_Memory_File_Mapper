@@ -18,7 +18,7 @@
 
 namespace qiniu {
 	namespace largefile {
-		const int32_t EXIT_DISK_OPER_INCOMPLETE = -8012;	//read or write length is less than the required.
+        const int32_t EXIT_DISK_OPER_INCOMPLETE = -8012;	//read or write length is less than the required.
         const int32_t EXIT_INDEX_ALREADY_LOADED_ERROR = -8013;
         const int32_t EXIT_META_UNEXPECT_FOUND_ERROR = -8014;
         const int32_t EXIT_INDEX_CORRUPT_ERROR = -8015;
