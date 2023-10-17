@@ -320,7 +320,7 @@ namespace qiniu {
 			//1.找出放在哪一个哈希桶
 			int32_t slot = static_cast<uint32_t>(key) % get_bucket_size();
 
-			//2.确定meta节点存储在文件中的偏移量
+			//2.确定meta节点可以存储的位置（在文件中的偏移量）
 			if (index_header()->free_head_offset_ != 0) {//如果可重用节点列表中有节点，则优先添加到这些节点里
 				MetaInfo tmp_meta_info;
 				ret = mmap_file_op_->pRead_file(reinterpret_cast<char*>(&tmp_meta_info), sizeof(MetaInfo), index_header()->free_head_offset_);	//取得可重用列表中的节点的信息，方便之后修改index_header中free_head_offset的首节点。
@@ -345,7 +345,7 @@ namespace qiniu {
 
 			//4.将有meta信息索引文件插入到哈希链表中
 			if (previous_offset != 0) {//如果存在之前的节点，即当前节点不是首节点，则将前一节点的next offset设置为本节点的offset
-				ret = mmap_file_op_->pRead_file(reinterpret_cast<char*>(&tmp_meta_info), sizeof(MetaInfo), previous_offset);
+				ret = mmap_file_op_->pRead_file(reinterpret_cast<char*>(&tmp_meta_info), sizeof(MetaInfo), previous_offset);//读取前一个节点到tmp_meta_info中
 				if (ret != TFS_SUCCESS) {
 					index_header()->index_file_size_ -= sizeof(MetaInfo);	//回滚索引文件的当前偏移量/大小
 					return ret;
