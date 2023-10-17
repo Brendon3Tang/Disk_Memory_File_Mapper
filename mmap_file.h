@@ -8,7 +8,7 @@ namespace qiniu{
          *      MMapFile会把文件fd_映射到内存中，通过私有成员data_记录内存地址，size_记录
          * 已经映射的内存的大小，同时mmap_file_option_记录映射规则。使用MMapFile需要显示
          * 地通过fd初始化MMapFile。
-         *      提供接口map_file、munmap_file、remap_file分别用于映射fd、接触映射fd_、以及
+         *      提供接口map_file、munmap_file、remap_file分别用于映射fd、解除映射fd_、以及
          * 为映射了的fd_扩容/缩容。
          *      提供接口get_data与get_size用于外部访问映射的内存和得到映射的内存的大小
          *      提供接口sync_file用于同步内存中的数据到磁盘中

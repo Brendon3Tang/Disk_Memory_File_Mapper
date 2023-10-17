@@ -6,6 +6,11 @@
 
 namespace qiniu {
 	namespace largefile {
+		/**
+		 * MMapFileOperation是FileOperation的派生类。继承了后者对文件操作的接口，同时配合MMapFile对象可以把数据
+		 * 映射到内存中。同时，它能够判断数据是否被映射在内存，如果映射在内存，则使用自身重写的函数来进行read、write，
+		 * （不经过页缓存，直接memcpy内存的data）以及flush。如果没有映射在内存，则使用基类的read、write、flush。
+		*/
 		class MMapFileOperation : public largefile::FileOperation {
 		public:
 			MMapFileOperation(const std::string& file_name, const int open_flags = O_CREAT | O_RDWR | O_LARGEFILE) :

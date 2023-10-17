@@ -25,13 +25,17 @@
 - 各个函数的具体功能见函数的注释。
 
 ### 1.2 MMapFileOperation
-
+- MMapFileOperation是FileOperation的派生类。继承了后者对文件操作的接口，同时配合MMapFile对象可以把数据映射到内存中。同时，它能够判断数据是否被映射在内存，如果映射在内存，则使用自身重写的函数来进行read、write，（不经过页缓存，直接memcpy内存的data）以及flush。如果没有映射在内存，则使用基类的read、write、flush。
 
 ### 1.3 FileOperation
 - FileOperation可以直接从磁盘打开文件，并进行读取/写入等操作(但还是会经过内存，即磁盘->内核缓存->用户进程)，但是只要程序运行期间不崩溃，那么所有的read、write操作都会最终保存到磁盘中去。该类是MMapFileOperation的基类。
 - 可以打开文件、关闭文件、读写文件、把文件立刻写入磁盘保存、缩小/截断文件、跳跃式的读取文件
 
 ### 1.4 MMapFile
+- MMapFile会把文件fd_映射到内存中，通过私有成员data_记录内存地址，size_记录已经映射的内存的大小，同时mmap_file_option_记录映射规则。使用MMapFile需要显示地通过fd初始化MMapFile。
+  - 提供接口map_file、munmap_file、remap_file分别用于映射fd、解除映射fd_、以及为映射了的fd_扩容/缩容。
+  - 提供接口get_data与get_size用于外部访问映射的内存和得到映射的内存的大小
+  - 提供接口sync_file用于同步内存中的数据到磁盘中
 
 
 ## 二、块初始化 - block_init_test.cpp
@@ -90,10 +94,64 @@
 5. meta_info的更改是通过接口：
    1. write_segment_meta(meta_info.get_key(), meta_info)
    2. delete_segment_meta(file_id)
-6. open_flags = O_CREAT | O_RDWR | O_LARGEFILE
-   1. O_CREAT表示会创建 
+6. MMapFileOperation构造函数中的open_flags = O_CREAT | O_RDWR | O_LARGEFILE（FileOperation中的open_flags = O_RDWR | O_LARGEFILE）
+   1. O_CREAT表示打开时文件如果不存在会自动创建
+   2. O_RDWR表示可读可写
+   3. O_LARGEFILE表示可以打开大文件
+7. mmap函数、munmap函数：
+```
+ void *mmap(void *addr, size_t length, int prot, int flags,
+            int fd, off_t offset);
+ int munmap(void *addr, size_t length);　
+```
+- 参数start：指向欲映射的内存起始地址，通常设为 NULL，代表让系统自动选定地址，映射成功后返回该地址。
+- 参数length：代表将文件中多大的部分映射到内存。
+- 参数prot：映射区域的保护方式。可以为以下几种方式的组合：
+  - PROT_EXEC         执行    
+  - PROT_READ         读取    
+  - PROT_WRITE        写入   
+  - PROT_NONE         不能存取
 
-## 优化效果：
+- 参数flags：影响映射区域的各种特性。必须要指定MAP_SHARED 或MAP_PRIVATE。
+   - MAP_SHARED     － 映射区域数据与文件对应，允许其他进程共享
+   - MAP_PRIVATE    － 映射区域生成文件的copy，修改不同步文件
+   - MAP_ANONYMOUS  － 建立匿名映射。此时会忽略参数fd，不涉及文件，			      而且映射区域无法和其他进程共享。
+   - MAP_DENYWRITE  － 允许对映射区域的写入操作，其他对文件直接写入		      的操作将会被拒绝。
+   - MAP_LOCKED     － 将映射区域锁定住，这表示该区域不会被置swap
+
+- 参数fd：要映射到内存中的文件描述符。如果使用匿名内存映射时，即flags中设置了MAP_ANONYMOUS，fd设为-1。有些系统不支持匿名内存映射，则可以使用fopen打开/dev/zero文件，然后对该文件进行映射，可以同样达到匿名内存映射的效果。
+- 参数offset：文件映射的偏移量，通常设置为0，代表从文件最前方开始对应，offset必须是分页大小的整数倍。　
+8. mmap的msync
+```
+函数原型
+int msync ( void * addr, size_t len, int flags)
+头文件
+#include<sys/mman.h>   
+```
+- addr：文件映射到进程空间的地址；
+- len：映射空间的大小；
+- flags：刷新的参数设置，可以取值MS_ASYNC/ MS_SYNC
+  - 取值为MS_ASYNC（异步）时，调用会立即返回，不等到更新的完成；
+  - 取值为MS_SYNC（同步）时，调用会等到更新完成之后返回；
+- 返回值：成功则返回0；失败则返回-1；    
+9. mmap的mremap：扩大（或缩小）现有的内存映射
+```
+函数原型
+void * mremap(void *old_address, size_t old_size , size_t new_size, int flags);
+
+头文件
+#include <unistd.h> 
+#include <sys/mman.h> 
+```
+- addr：     上一次已映射到进程空间的地址；
+- old_size： 旧空间的大小；
+- new_size： 重新映射指定的新空间大小；
+- flags:     取值可以是0或者MREMAP_MAYMOVE
+  - 0代表不允许内核移动映射区域，  
+  - MREMAP_MAYMOVE则表示内核可以根据实际情况移动映射区域以找到一个符合new_size大小要求的内存区域
+- 返回值：成功则返回0；失败则返回-1；   
+
+## 七、优化效果：
 ### 正常读取：
   - inode节点大小 - 一般是128字节或256字节。inode节点的总数，格式化时就给定，一般是每1KB或每2KB就设置一个inode。一块1GB的硬盘中，每1KB就设置一个inode，那么inode table的大小就会达到128MB，**占整块硬盘的12.8%**。
 - 大文件存储模式读取，索引的大小：

@@ -41,7 +41,7 @@ namespace qiniu {
 			return TFS_SUCCESS;
 		}
 
-		// pRead_file()可以把内存中的文件内容读取到buf上
+		// pRead_file()可以把内存中的文件内容直接拷贝到到buf上，而不需要经过调用read使用页缓存
 		int MMapFileOperation::pRead_file(char* buf, const int32_t size, const int64_t offset)
 		{
 			//情况一：当文件已经映射到内存时
@@ -54,15 +54,15 @@ namespace qiniu {
 				}
 				//b.当要访问的地址在内存已映射的地址内部时，我们可以直接访问
 				if (size + offset <= map_file_->get_size()) {
-					memcpy(buf, (char*)map_file_->get_data() + offset, size);	//把map_file_的数据放到buf上以便读取
+					memcpy(buf, (char*)map_file_->get_data() + offset, size);	//把map_file_的数据放到buf上以便读取，不再使用read的页缓存读取
 					return TFS_SUCCESS;
 				}
 			}
-			//情况二：当文件没有被映射到内存上时
+			//情况二：当文件没有被映射到内存上时，使用read函数，经过页缓存
 			return FileOperation::pRead_file(buf, size, offset);	
 		}
 
-		//pWrite_file会把buf立的内容写入到内存中
+		//pWrite_file会把buf里的内容写入到内存中，而不需要使用write经过页缓存
 		int MMapFileOperation::pWrite_file(const char* buf, const int32_t size, const int64_t offset)
 		{
 			//情况一：当文件已经映射到内存时
@@ -79,7 +79,7 @@ namespace qiniu {
 					return TFS_SUCCESS;
 				}
 			}
-			//情况二：当文件没有被映射到内存上时
+			//情况二：当文件没有被映射到内存上时，使用write函数，经过页缓存
 			return FileOperation::pWrite_file(buf, size, offset);
 		}
 		void* MMapFileOperation::get_map_data() const
